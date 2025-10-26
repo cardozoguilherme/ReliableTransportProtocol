@@ -2,8 +2,11 @@ import socket
 import json
 
 # Servidor com troca de mensagens
+
+# ===== CONFIGURAÇÕES DO SERVIDOR =====
 HOST = 'localhost'  # Endereço do servidor
-PORT = 8080        # Porta do servidor
+PORT = 8080         # Porta do servidor
+WINDOW_SIZE = 5     # Tamanho da janela
 
 def send_message(socket, message):
     """Envia uma mensagem com framing"""
@@ -40,6 +43,13 @@ def create_ack_packet(seq_num):
         "seq_num": seq_num # Número do pacote confirmado
     }
 
+def create_nack_packet(seq_num):
+    """Cria um pacote de reconhecimento negativo"""
+    return {
+        "type": "nack",    # Tipo de rejeição
+        "seq_num": seq_num # Número do pacote rejeitado
+    }
+
 # Configurar servidor
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # Socket TCP
 server_socket.bind((HOST, PORT)) # Associar ao endereço e porta
@@ -63,7 +73,7 @@ while True:
     response = {
         "type": "handshake_ack",                                # Confirmação do handshake
         "max_message_size": handshake_data["max_message_size"], # Confirmar tamanho
-        "window_size": 5,                                       # Tamanho da janela
+        "window_size": WINDOW_SIZE,                             # Tamanho da janela
         "operation_mode": handshake_data["operation_mode"],     # Confirmar modo
         "status": "success"                                     # Status de sucesso
     }
@@ -80,6 +90,18 @@ while True:
     received_segments = [] # Lista para armazenar segmentos recebidos
     expected_seq = 0       # Próximo número de sequência esperado
     
+    # Variáveis para Selective Repeat
+    operation_mode = handshake_data.get("operation_mode", "go_back_n")
+    window_size = handshake_data.get("window_size", WINDOW_SIZE)
+    buffer = {}  # Buffer para armazenar pacotes fora de ordem
+    buffer_size = window_size * 2  # Buffer maior que a janela
+    
+    if operation_mode == "selective_repeat":
+        print(f"[SR] Iniciando Selective Repeat com janela de tamanho: {window_size}")
+        print(f"[BUFFER] Buffer de recebimento: {buffer_size} pacotes")
+    else:
+        print(f"[GBN] Iniciando Go-Back-N com janela de tamanho: {window_size}")
+    
     try:
         while True:
             # Receber pacote de dados do cliente
@@ -92,30 +114,62 @@ while True:
                 checksum = packet["checksum"] # Soma de verificação
                 
                 # Verificar se a soma de verificação está correta
-                if verify_checksum(payload, checksum):
-                    print(f"✓ Pacote {seq_num} válido: '{payload}' (checksum: {checksum})")
+                is_valid = verify_checksum(payload, checksum)
+                if is_valid:
+                    print(f"[OK] Pacote {seq_num} válido: '{payload}' (checksum: {checksum})")
                     
-                    # Armazenar segmento se for o próximo esperado
-                    if seq_num == expected_seq:
-                        received_segments.append(payload)  # Adicionar à lista
-                        expected_seq += 1  # Próximo número esperado
-                        print(f"✓ Segmento {seq_num} adicionado à mensagem")
-                    else:
-                        print(f"⚠ Pacote {seq_num} fora de ordem (esperado: {expected_seq})")
+                    if operation_mode == "go_back_n":
+                        # Go-Back-N: Armazenar segmento se for o próximo esperado
+                        if seq_num == expected_seq:
+                            received_segments.append(payload)  # Adicionar à lista
+                            expected_seq += 1  # Próximo número esperado
+                            print(f"[OK] Segmento {seq_num} adicionado à mensagem")
+                            
+                            # Enviar ACK para pacote válido
+                            ack = create_ack_packet(seq_num)
+                            send_message(client_socket, ack)
+                            print(f"[ACK] ACK enviado para pacote {seq_num}")
+                        else:
+                            print(f"[WARNING] Pacote {seq_num} fora de ordem (esperado: {expected_seq}) - ignorando")
+                            # Go-Back-N: NÃO enviar ACK para pacotes fora de ordem
+                    
+                    elif operation_mode == "selective_repeat":
+                        # Selective Repeat: Armazenar pacote no buffer
+                        if seq_num not in buffer:
+                            buffer[seq_num] = payload
+                            print(f"[BUFFER] Pacote {seq_num} armazenado no buffer")
+                        
+                        # Verificar se podemos entregar pacotes em ordem
+                        while expected_seq in buffer:
+                            received_segments.append(buffer[expected_seq])
+                            del buffer[expected_seq]  # Remover do buffer
+                            print(f"[DELIVER] Segmento {expected_seq} entregue em ordem")
+                            expected_seq += 1
+                        
+                        # Enviar ACK para pacote válido
+                        ack = create_ack_packet(seq_num)
+                        send_message(client_socket, ack)
+                        print(f"[ACK] ACK enviado para pacote {seq_num}")
+                        
+                        # Mostrar estado do buffer
+                        if buffer:
+                            print(f"[BUFFER] Buffer atual: {list(buffer.keys())}")
+                        else:
+                            print(f"[BUFFER] Buffer vazio")
                 else:
-                    print(f"✗ Pacote {seq_num} com erro de checksum")
-                
-                # Enviar confirmação (ACK) para o cliente
-                ack = create_ack_packet(seq_num)
-                send_message(client_socket, ack)
-                print(f"ACK enviado para pacote {seq_num}")
+                    print(f"[ERROR] Pacote {seq_num} com erro de checksum")
+                    
+                    # Enviar NACK para pacote com erro
+                    nack = create_nack_packet(seq_num)
+                    send_message(client_socket, nack)
+                    print(f"[NACK] NACK enviado para pacote {seq_num}")
                 
                 # Mostrar informações do pacote
                 print(f"Metadados do pacote {seq_num}:")
                 print(f"  - Payload: '{payload}'")
                 print(f"  - Checksum: {checksum}")
                 print(f"  - Número de sequência: {seq_num}")
-                print(f"  - Status: {'Válido' if verify_checksum(payload, checksum) else 'Inválido'}")
+                print(f"  - Status: {'Válido' if is_valid else 'Inválido'}")
                 print()
                 
     except Exception as e:
@@ -128,7 +182,7 @@ while True:
         print(f"Texto: {complete_message}")
         print(f"Total de segmentos: {len(received_segments)}")
         print(f"Tamanho total: {len(complete_message)} caracteres")
-    
+        
     print("\n=== TROCA DE MENSAGENS CONCLUÍDA ===")
     client_socket.close() # Fechar conexão com cliente
     print(f"Conexão com {client_address} encerrada")
