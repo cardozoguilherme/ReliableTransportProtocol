@@ -56,7 +56,7 @@ Timer + NACK + Checksum
 
 #### **Implementado:**
 
-- ✅ **Segmentação**: Mensagem dividida em segmentos de 4 caracteres
+- ✅ **Segmentação**: Mensagem dividida em segmentos de até 4 caracteres (configurável)
 - ✅ **Janela Deslizante**: Tamanho configurável (1-5 pacotes)
 - ✅ **Go-Back-N**: Retransmissão em lote com janela deslizante
 - ✅ **Selective Repeat**: Retransmissão seletiva com buffer
@@ -148,7 +148,7 @@ A janela deslizante é um conjunto de pacotes que podem ser enviados simultaneam
 
 ### Segmentos vs Pacotes
 
-- **Segmento**: Pedaço da mensagem original (4 caracteres)
+- **Segmento**: Pedaço da mensagem original (até 4 caracteres)
 - **Pacote**: Segmento + metadados (número de sequência, checksum, tipo)
 
 ### Checksum
@@ -294,14 +294,15 @@ O cliente se conectará automaticamente ao servidor, realizará o handshake e en
 
 #### Cliente (`client.py`)
 
-| Constante          | Localização | Padrão          | Descrição                  |
-| ------------------ | ----------- | --------------- | -------------------------- |
-| `HOST`             | Linha 9     | `'localhost'`   | Endereço do servidor       |
-| `PORT`             | Linha 10    | `8080`          | Porta do servidor          |
-| `MAX_MESSAGE_SIZE` | Linha 11    | `100`           | Tamanho máximo da mensagem |
-| `OPERATION_MODE`   | Linha 12    | `'go_back_n'`   | Modo de operação           |
-| `TIMEOUT_DURATION` | Linha 13    | `5.0`           | Timeout em segundos        |
-| `TEXT_TO_SEND`     | Linha 14    | Mensagem padrão | Texto a ser enviado        |
+| Constante          | Localização | Padrão          | Descrição                    |
+| ------------------ | ----------- | --------------- | ---------------------------- |
+| `HOST`             | Linha 9     | `'localhost'`   | Endereço do servidor         |
+| `PORT`             | Linha 10    | `8080`          | Porta do servidor            |
+| `MAX_MESSAGE_SIZE` | Linha 11    | `100`           | Tamanho máximo da mensagem   |
+| `OPERATION_MODE`   | Linha 12    | `'go_back_n'`   | Modo de operação             |
+| `TIMEOUT_DURATION` | Linha 13    | `5.0`           | Timeout em segundos          |
+| `TEXT_TO_SEND`     | Linha 14    | Mensagem padrão | Texto a ser enviado          |
+| `PAYLOAD_SIZE`     | Linha 15    | `4`             | Tamanho do segmento (máx. 4) |
 
 #### Servidor (`server.py`)
 
@@ -349,6 +350,15 @@ TEXT_TO_SEND = "Sua mensagem personalizada aqui"
 ```
 
 #### Alterar tamanho máximo da mensagem
+
+#### Alterar tamanho do segmento (payload por pacote)
+
+```python
+# Em client.py, linha 15:
+PAYLOAD_SIZE = 3  # Qualquer valor entre 1 e 4
+```
+
+Observação: por especificação, o tamanho máximo é 4. O código aplica um limite superior automaticamente.
 
 ```python
 # Em client.py, linha 11:

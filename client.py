@@ -12,6 +12,7 @@ MAX_MESSAGE_SIZE = 100                # Tamanho máximo da mensagem
 OPERATION_MODE = 'go_back_n'          # Modo de operação ('go_back_n' ou 'selective_repeat')
 TIMEOUT_DURATION = 5.0                # Timeout em segundos
 TEXT_TO_SEND = "Olá mundo! Esta é uma mensagem de teste para o protocolo de transporte confiável."  # Texto a ser enviado
+PAYLOAD_SIZE = 4                      # Tamanho do segmento (máximo 4, conforme especificação)
 
 def send_message(socket, message):
     """Envia uma mensagem com framing"""
@@ -138,8 +139,9 @@ if len(text_to_send) > max_message_size:
 else:
     print(f"[OK] Mensagem dentro do limite de {max_message_size} caracteres")
 
-# Dividir texto em segmentos de 4 caracteres
-segments = [text_to_send[i:i+4] for i in range(0, len(text_to_send), 4)] # Cortar em pedaços de 4 caracteres
+# Dividir texto em segmentos de até 4 caracteres (configurável por PAYLOAD_SIZE)
+effective_payload = PAYLOAD_SIZE if PAYLOAD_SIZE <= 4 else 4
+segments = [text_to_send[i:i+effective_payload] for i in range(0, len(text_to_send), effective_payload)] # Cortar em pedaços de até 4 caracteres
 print(f"Segmentos criados: {segments}\n")
 
 # Implementar protocolo baseado no modo de operação
