@@ -1,12 +1,20 @@
 import socket
 import json
+import argparse
 
 # Servidor com troca de mensagens
 
-# ===== CONFIGURAÇÕES DO SERVIDOR =====
-HOST = 'localhost'  # Endereço do servidor
-PORT = 8080         # Porta do servidor
-WINDOW_SIZE = 5     # Tamanho da janela
+# ===== CONFIGURAÇÕES DO SERVIDOR (via CLI) =====
+parser = argparse.ArgumentParser(description='Servidor do Protocolo de Transporte Confiável')
+parser.add_argument('--host', type=str, default='localhost', help='Endereço do servidor (padrão: localhost)')
+parser.add_argument('--port', type=int, default=8080, help='Porta do servidor (padrão: 8080)')
+parser.add_argument('--window-size', type=int, default=5, help='Tamanho da janela (padrão: 5)')
+
+args = parser.parse_args()
+
+HOST = args.host
+PORT = args.port
+WINDOW_SIZE = args.window_size
 
 def send_message(socket, message):
     """Envia uma mensagem com framing"""

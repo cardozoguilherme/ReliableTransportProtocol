@@ -2,17 +2,34 @@ import socket
 import json
 import time
 import threading
+import argparse
 
 # Cliente com troca de mensagens
 
-# ===== CONFIGURAÇÕES DO CLIENTE =====
-HOST = 'localhost'                    # Endereço do servidor
-PORT = 8080                           # Porta do servidor
-MAX_MESSAGE_SIZE = 100                # Tamanho máximo da mensagem
-OPERATION_MODE = 'go_back_n'          # Modo de operação ('go_back_n' ou 'selective_repeat')
-TIMEOUT_DURATION = 5.0                # Timeout em segundos
-TEXT_TO_SEND = "Olá mundo! Esta é uma mensagem de teste para o protocolo de transporte confiável."  # Texto a ser enviado
-PAYLOAD_SIZE = 4                      # Tamanho do segmento (máximo 4, conforme especificação)
+# ===== CONFIGURAÇÕES DO CLIENTE (via CLI) =====
+parser = argparse.ArgumentParser(description='Cliente do Protocolo de Transporte Confiável')
+parser.add_argument('--host', type=str, default='localhost', help='Endereço do servidor (padrão: localhost)')
+parser.add_argument('--port', type=int, default=8080, help='Porta do servidor (padrão: 8080)')
+parser.add_argument('--max-message-size', type=int, default=100, help='Tamanho máximo da mensagem (padrão: 100)')
+parser.add_argument('--operation-mode', type=str, default='go_back_n', 
+                    choices=['go_back_n', 'selective_repeat'], 
+                    help='Modo de operação: go_back_n ou selective_repeat (padrão: go_back_n)')
+parser.add_argument('--timeout', type=float, default=5.0, help='Timeout em segundos (padrão: 5.0)')
+parser.add_argument('--text', type=str, 
+                    default="Olá mundo! Esta é uma mensagem de teste para o protocolo de transporte confiável.",
+                    help='Texto a ser enviado')
+parser.add_argument('--payload-size', type=int, default=4, 
+                    help='Tamanho do segmento/payload (padrão: 4, máximo: 4)')
+
+args = parser.parse_args()
+
+HOST = args.host
+PORT = args.port
+MAX_MESSAGE_SIZE = args.max_message_size
+OPERATION_MODE = args.operation_mode
+TIMEOUT_DURATION = args.timeout
+TEXT_TO_SEND = args.text
+PAYLOAD_SIZE = min(args.payload_size, 4)  # Garantir que não exceda 4
 
 def send_message(socket, message):
     """Envia uma mensagem com framing"""
