@@ -1,6 +1,8 @@
 import socket
 import json
 import argparse
+import base64
+from cryptography.fernet import Fernet
 
 # Servidor com troca de mensagens
 
@@ -26,14 +28,41 @@ def send_message(socket, message):
 def receive_message(socket):
     """Recebe uma mensagem com framing"""
     size_data = socket.recv(4) # Recebe os 4 bytes do tamanho
+    
+    # Verificar se a conexão foi fechada
+    if not size_data or len(size_data) == 0:
+        raise ConnectionError("Conexão fechada pelo cliente")
+    
+    # Verificar se recebemos os 4 bytes completos
+    if len(size_data) < 4:
+        raise ConnectionError("Conexão fechada antes de receber tamanho completo")
+    
     size = int.from_bytes(size_data, byteorder='big') # Converte para número
+    
+    # Verificar se o tamanho é válido
+    if size <= 0:
+        raise ValueError("Tamanho de mensagem inválido")
     
     message_data = b'' # Buffer para a mensagem (string de bytes)
     while len(message_data) < size: # Recebe até completar o tamanho
         chunk = socket.recv(size - len(message_data))
+        if not chunk:  # Conexão fechada durante recebimento
+            raise ConnectionError("Conexão fechada durante recebimento de dados")
         message_data += chunk
     
+    # Verificar se recebemos dados válidos
+    if not message_data:
+        raise ValueError("Mensagem vazia recebida")
+    
     return json.loads(message_data.decode('utf-8')) # Converte de volta para dicionário
+
+def decrypt_payload(encrypted_payload, key):
+    """Descriptografa o payload usando a chave fornecida"""
+    fernet = Fernet(key)
+    # Decodificar de base64
+    encrypted_bytes = base64.b64decode(encrypted_payload.encode('utf-8'))
+    decrypted = fernet.decrypt(encrypted_bytes)
+    return decrypted.decode('utf-8')
 
 def calculate_checksum(data):
     """Calcula soma de verificação simples"""
@@ -77,12 +106,27 @@ while True:
     handshake_data = receive_message(client_socket) # Receber handshake do cliente
     print(f"Dados recebidos: {handshake_data}")
     
+    # Verificar se cliente solicitou criptografia
+    encryption_enabled = handshake_data.get("encryption_enabled", False)
+    encryption_key = None
+    
+    if encryption_enabled:
+        # Receber chave de criptografia do cliente
+        if "encryption_key" in handshake_data:
+            encryption_key_b64 = handshake_data["encryption_key"]
+            encryption_key = base64.b64decode(encryption_key_b64.encode('utf-8'))
+            print("[ENCRYPTION] Chave de criptografia recebida e configurada")
+        else:
+            print("[WARNING] Criptografia solicitada mas chave não fornecida")
+            encryption_enabled = False
+    
     # Enviar resposta do handshake
     response = {
         "type": "handshake_ack",                                # Confirmação do handshake
         "max_message_size": handshake_data["max_message_size"], # Confirmar tamanho
         "window_size": WINDOW_SIZE,                             # Tamanho da janela
         "operation_mode": handshake_data["operation_mode"],     # Confirmar modo
+        "encryption_enabled": encryption_enabled,               # Confirmar criptografia
         "status": "success"                                     # Status de sucesso
     }
     
@@ -91,6 +135,8 @@ while True:
     print(f"Handshake concluído:")
     print(f"  - Tamanho máximo: {handshake_data['max_message_size']}")
     print(f"  - Modo: {handshake_data['operation_mode']}")
+    if encryption_enabled:
+        print(f"  - Criptografia: Habilitada")
     
     # Troca de mensagens - recebimento dos dados
     print("\n=== INICIANDO TROCA DE MENSAGENS ===")
@@ -100,28 +146,48 @@ while True:
     
     # Variáveis para Selective Repeat
     operation_mode = handshake_data.get("operation_mode", "go_back_n")
-    window_size = handshake_data.get("window_size", WINDOW_SIZE)
     buffer = {}  # Buffer para armazenar pacotes fora de ordem
-    buffer_size = window_size * 2  # Buffer maior que a janela
     
     if operation_mode == "selective_repeat":
-        print(f"[SR] Iniciando Selective Repeat com janela de tamanho: {window_size}")
-        print(f"[BUFFER] Buffer de recebimento: {buffer_size} pacotes")
+        print(f"[SR] Iniciando Selective Repeat com janela de tamanho: {WINDOW_SIZE}")
+        print(f"[BUFFER] Buffer de recebimento: {WINDOW_SIZE * 2} pacotes")
     else:
-        print(f"[GBN] Iniciando Go-Back-N com janela de tamanho: {window_size}")
+        print(f"[GBN] Iniciando Go-Back-N com janela de tamanho: {WINDOW_SIZE}")
     
     try:
         while True:
             # Receber pacote de dados do cliente
-            packet = receive_message(client_socket)
+            try:
+                packet = receive_message(client_socket)
+            except (ConnectionError, ValueError) as e:
+                # Conexão fechada pelo cliente ou dados inválidos
+                print(f"[INFO] Cliente encerrou a conexão: {e}")
+                break
+            except json.JSONDecodeError as e:
+                # Erro ao decodificar JSON (conexão pode ter sido fechada)
+                print(f"[INFO] Erro ao decodificar mensagem (conexão pode ter sido fechada): {e}")
+                break
+            
             print(f"Pacote recebido: {packet}")
             
             if packet["type"] == "data": # Se for pacote de dados
                 seq_num = packet["seq_num"]   # Número de sequência
-                payload = packet["payload"]   # Dados (4 caracteres)
+                payload_encrypted = packet["payload"]   # Dados (pode estar criptografado)
                 checksum = packet["checksum"] # Soma de verificação
+                is_encrypted = packet.get("encrypted", False)  # Verificar se está criptografado
+                
+                # Descriptografar payload se necessário
+                payload = payload_encrypted
+                if is_encrypted and encryption_key:
+                    try:
+                        payload = decrypt_payload(payload_encrypted, encryption_key)
+                        print(f"[ENCRYPTION] Payload descriptografado para pacote {seq_num}")
+                    except Exception as e:
+                        print(f"[ERROR] Falha ao descriptografar pacote {seq_num}: {e}")
+                        payload = payload_encrypted  # Usar payload original em caso de erro
                 
                 # Verificar se a soma de verificação está correta
+                # O checksum é calculado sobre o payload original (antes da criptografia)
                 is_valid = verify_checksum(payload, checksum)
                 if is_valid:
                     print(f"[OK] Pacote {seq_num} válido: '{payload}' (checksum: {checksum})")
@@ -181,7 +247,8 @@ while True:
                 print()
                 
     except Exception as e:
-        print(f"Erro na comunicação: {e}")
+        # Erros inesperados (erros de conexão já tratados no loop interno)
+        print(f"[ERROR] Erro inesperado na comunicação: {e}")
     
     # Reconstruir mensagem completa juntando todos os segmentos
     if received_segments:

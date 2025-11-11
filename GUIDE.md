@@ -33,15 +33,18 @@ python client.py
 
 ### Cliente (`client.py`)
 
-| Argumento            | Padrão            | Exemplo                             |
-| -------------------- | ----------------- | ----------------------------------- |
-| `--host`             | `localhost`       | `--host 192.168.1.100`              |
-| `--port`             | `8080`            | `--port 9090`                       |
-| `--operation-mode`   | `go_back_n`       | `--operation-mode selective_repeat` |
-| `--max-message-size` | `100`             | `--max-message-size 200`            |
-| `--timeout`          | `5.0`             | `--timeout 3.0`                     |
-| `--text`             | (mensagem padrão) | `--text "Minha mensagem"`           |
-| `--payload-size`     | `4`               | `--payload-size 2`                  |
+| Argumento             | Padrão            | Exemplo                              |
+| --------------------- | ----------------- | ------------------------------------ |
+| `--host`              | `localhost`       | `--host 192.168.1.100`               |
+| `--port`              | `8080`            | `--port 9090`                        |
+| `--operation-mode`    | `go_back_n`       | `--operation-mode selective_repeat`  |
+| `--max-message-size`  | `100`             | `--max-message-size 200`             |
+| `--timeout`           | `5.0`             | `--timeout 3.0`                      |
+| `--text`              | (mensagem padrão) | `--text "Minha mensagem"`            |
+| `--payload-size`      | `4`               | `--payload-size 2`                   |
+| `--enable-encryption` | (desabilitado)    | `--enable-encryption`                |
+| `--drop-packets`      | (nenhum)          | `--drop-packets "2,5"` ou `"3-7"`    |
+| `--corrupt-packets`   | (nenhum)          | `--corrupt-packets "3,7"` ou `"4-6"` |
 
 **Nota:** O `--payload-size` tem limite máximo de **4 caracteres** conforme especificação. Valores maiores serão automaticamente limitados a 4.
 
@@ -86,6 +89,35 @@ python server.py --port 9090 --window-size 7
 python client.py --port 9090 --operation-mode selective_repeat --timeout 3.0 --max-message-size 150
 ```
 
+### Com criptografia simétrica
+
+```bash
+# Servidor (suporta criptografia automaticamente)
+python server.py
+
+# Cliente com criptografia habilitada
+python client.py --enable-encryption
+```
+
+### Com simulação de erros
+
+```bash
+# Perder pacote 2
+python client.py --drop-packets 2
+
+# Corromper pacote 3
+python client.py --corrupt-packets 3
+
+# Perder múltiplos pacotes
+python client.py --drop-packets "2,5,10"
+
+# Perder intervalo de pacotes
+python client.py --drop-packets "3-7"
+
+# Combinar perda e corrupção
+python client.py --drop-packets 2 --corrupt-packets 5
+```
+
 ## Ajuda
 
 ```bash
@@ -99,3 +131,18 @@ python client.py --help
 - **Strings com espaços:** Use aspas: `--text "mensagem com espaços"`
 - **Modos:** `go_back_n` (padrão) ou `selective_repeat`
 - **Payload máximo:** 4 caracteres (conforme especificação - valores maiores são limitados automaticamente)
+- **Criptografia:** Use `--enable-encryption` no cliente para criptografar payloads (requer biblioteca `cryptography`)
+- **Simulação de Erros:** Use `--drop-packets` para simular perdas e `--corrupt-packets` para simular corrupção
+- **Intervalos:** Suporte a intervalos (`"2-5"`) e listas (`"2,5,10"`) para simulação de erros
+
+## Instalação de Dependências
+
+```bash
+pip install -r requirements.txt
+```
+
+ou
+
+```bash
+pip install cryptography
+```

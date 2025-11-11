@@ -73,25 +73,44 @@ Timer + NACK + Checksum
 - ✅ **Janela/Paralelismo**: Envio simultâneo de múltiplos pacotes
 - ✅ **Algoritmo de Integridade**: Checksum para detecção de corrupção
 
-### 🔄 **Entrega 3 - Simulação de Erros** (PENDENTE)
+### ✅ **Entrega 3 - Simulação de Erros** (CONCLUÍDA)
 
 **Objetivo:** Inserção de erros e perdas simulados, bem como a implementação do correto comportamento dos processos.
 
-#### **A Implementar:**
+#### **Implementado:**
 
-- ❌ **Simulação de Perdas**: Inserir perdas determinísticas de pacotes
-- ❌ **Simulação de Corrupção**: Inserir erros de checksum determinísticos
-- ❌ **Configuração de Erros**: Interface para definir tipos e frequência de erros
-- ❌ **Modo de Teste**: Alternar entre modo normal e modo de simulação
-- ❌ **Estatísticas**: Relatório de erros inseridos vs detectados
+- ✅ **Simulação de Perdas**: Perda determinística de pacotes específicos
+- ✅ **Simulação de Corrupção**: Corrupção determinística de checksums
+- ✅ **Configuração de Erros**: Argumentos CLI para definir pacotes a perder/corromper
+- ✅ **Modo de Teste**: Ativado via argumentos `--drop-packets` e `--corrupt-packets`
+- ✅ **Estatísticas**: Relatório de erros inseridos ao final da transmissão
 
-#### **Funcionalidades Planejadas:**
+#### **Funcionalidades Implementadas:**
 
-- **Perda de Pacotes**: Simular perda de pacotes específicos
-- **Corrupção de Dados**: Simular checksums incorretos
-- **Perda de ACKs**: Simular perda de confirmações
-- **Atrasos**: Simular atrasos na transmissão
-- **Configuração**: Interface para escolher tipos de erros
+- **Perda de Pacotes**: Simular perda de pacotes específicos via `--drop-packets`
+- **Corrupção de Checksum**: Simular checksums incorretos via `--corrupt-packets`
+- **Intervalos**: Suporte a intervalos (ex: `"2-5"`) e listas (ex: `"2,5,10"`)
+- **Retransmissão Inteligente**: Pacotes corrompidos são retransmitidos com checksum correto
+- **Estatísticas**: Contador de pacotes perdidos e corrompidos
+
+**Uso:**
+
+```bash
+# Perder pacote 2
+python client.py --drop-packets 2
+
+# Corromper pacote 3
+python client.py --corrupt-packets 3
+
+# Perder múltiplos pacotes
+python client.py --drop-packets "2,5,10"
+
+# Perder intervalo de pacotes
+python client.py --drop-packets "3-7"
+
+# Combinar perda e corrupção
+python client.py --drop-packets 2 --corrupt-packets 5
+```
 
 ### 🎯 **Pontuação Extra** (OPCIONAL)
 
@@ -121,17 +140,54 @@ def verify_checksum(payload, received_checksum):
 
 #### **Criptografia Simétrica** (0,5 pontos)
 
-- ❌ **Criptografia simétrica**
+- ✅ **Criptografia simétrica** (implementada)
+
+**Implementação:**
+
+A criptografia simétrica foi implementada usando o algoritmo **Fernet** (baseado em AES-128 em modo CBC) da biblioteca `cryptography`. O sistema criptografa apenas o payload dos pacotes de dados, mantendo os metadados (número de sequência, checksum, tipo) em texto claro para garantir o funcionamento correto do protocolo.
+
+**Características:**
+
+- **Algoritmo**: Fernet (AES-128 em modo CBC com HMAC)
+- **Geração de Chave**: Chave gerada automaticamente no cliente durante o handshake
+- **Troca de Chave**: Chave compartilhada via handshake (codificada em base64)
+- **Escopo**: Apenas o payload é criptografado (dados de 4 caracteres)
+- **Checksum**: Calculado sobre o payload original (antes da criptografia)
+- **Ativação**: Opcional via flag `--enable-encryption` no cliente
+
+**Uso:**
+
+```bash
+# Cliente com criptografia habilitada
+python client.py --enable-encryption
+
+# Servidor (suporta criptografia automaticamente)
+python server.py
+```
+
+**Fluxo de Criptografia:**
+
+1. Cliente gera chave Fernet durante o handshake
+2. Chave é enviada ao servidor no handshake (codificada em base64)
+3. Cliente criptografa cada payload antes de enviar
+4. Servidor descriptografa cada payload ao receber
+5. Checksum é calculado/verificado sobre o payload original
+
+**Segurança:**
+
+- Chave única por sessão (gerada aleatoriamente)
+- Criptografia autenticada (Fernet inclui HMAC)
+- Payloads são codificados em base64 para transmissão via JSON
 
 ### 📊 **Status Atual do Projeto**
 
-| Entrega                  | Status              | Progresso | Observações                             |
-| ------------------------ | ------------------- | --------- | --------------------------------------- |
-| **Entrega 1**            | ✅ **Concluída**    | 100%      | Handshake implementado                  |
-| **Entrega 2**            | ✅ **Concluída**    | 100%      | Go-Back-N e Selective Repeat funcionais |
-| **Entrega 3**            | 🔄 **Pendente**     | 0%        | Simulação de erros não implementada     |
-| **Extra - Integridade**  | ✅ **Concluída**    | 100%      | Algoritmo de checagem de integridade    |
-| **Extra - Criptografia** | ❌ **Não iniciada** | 0%        | Criptografia simétrica                  |
+| Entrega                  | Status           | Progresso | Observações                              |
+| ------------------------ | ---------------- | --------- | ---------------------------------------- |
+| **Entrega 1**            | ✅ **Concluída** | 100%      | Handshake implementado                   |
+| **Entrega 2**            | ✅ **Concluída** | 100%      | Go-Back-N e Selective Repeat funcionais  |
+| **Entrega 3**            | ✅ **Concluída** | 100%      | Simulação de erros e perdas implementada |
+| **Extra - Integridade**  | ✅ **Concluída** | 100%      | Algoritmo de checagem de integridade     |
+| **Extra - Criptografia** | ✅ **Concluída** | 100%      | Criptografia simétrica (Fernet/AES)      |
 
 ### 🚀 **Próximos Passos**
 
