@@ -279,31 +279,38 @@ Servidor: [BUFFER] Pacote 4 armazenado no buffer
 ### Exemplo 6: Teste com Criptografia
 
 ```bash
+# Criptografia com shift padrão (1)
 python client.py --enable-encryption --drop-packets 3
+
+# Criptografia com shift customizado
+python client.py --enable-encryption --caesar-shift 3 --drop-packets 3
 ```
 
 **O que acontece:**
 
-- Criptografia funciona normalmente
+- Criptografia (Cifra de César) funciona normalmente
 - Perda de pacote funciona com criptografia
 - Retransmissão também é criptografada
+- Shift padrão é 1, mas pode ser customizado com `--caesar-shift`
 
 ---
 
 ### Exemplo 7: Teste Completo
 
 ```bash
-python client.py --operation-mode selective_repeat --enable-encryption --drop-packets "2,5" --corrupt-packets 7 --timeout 3.0 --text "Mensagem de teste muito grande para testar se funciona usada no exemplo"
+python client.py --operation-mode selective_repeat --enable-encryption --caesar-shift 1 --drop-packets "2,5" --corrupt-packets 7 --timeout 3.0 --text "Mensagem de teste muito grande para testar se funciona usada no exemplo"
 ```
 
 **O que este comando faz:**
 
 - Usa Selective Repeat
-- Habilita criptografia
+- Habilita criptografia (Cifra de César com shift=1)
 - Perde pacotes 2 e 5
 - Corrompe pacote 7
 - Timeout de 3 segundos
 - Mensagem personalizada
+
+**Nota:** O `--caesar-shift` é opcional (padrão: 1). Pode ser omitido ou alterado para outro valor.
 
 ---
 
@@ -341,5 +348,7 @@ python client.py --corrupt-packets "4-6"
 ### Combinar Tudo
 
 ```bash
-python client.py --operation-mode selective_repeat --enable-encryption --drop-packets "2,5" --corrupt-packets 7 --timeout 3.0 --text "Mensagem de teste longa para testar corretamente e validar"
+python client.py --operation-mode selective_repeat --enable-encryption --caesar-shift 1 --drop-packets "2,5" --corrupt-packets 7 --timeout 3.0 --text "Mensagem de teste longa para testar corretamente e validar"
 ```
+
+**Nota:** O `--caesar-shift` é opcional (padrão: 1). Pode ser omitido ou alterado para outro valor.

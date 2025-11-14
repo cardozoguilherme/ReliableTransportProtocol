@@ -144,40 +144,49 @@ def verify_checksum(payload, received_checksum):
 
 **Implementação:**
 
-A criptografia simétrica foi implementada usando o algoritmo **Fernet** (baseado em AES-128 em modo CBC) da biblioteca `cryptography`. O sistema criptografa apenas o payload dos pacotes de dados, mantendo os metadados (número de sequência, checksum, tipo) em texto claro para garantir o funcionamento correto do protocolo.
+A criptografia simétrica foi implementada usando **Cifra de César**. O sistema criptografa apenas o payload dos pacotes de dados, mantendo os metadados (número de sequência, checksum, tipo) em texto claro para garantir o funcionamento correto do protocolo.
 
 **Características:**
 
-- **Algoritmo**: Fernet (AES-128 em modo CBC com HMAC)
-- **Geração de Chave**: Chave gerada automaticamente no cliente durante o handshake
-- **Troca de Chave**: Chave compartilhada via handshake (codificada em base64)
-- **Escopo**: Apenas o payload é criptografado (dados de 4 caracteres)
+- **Algoritmo**: Cifra de César (deslocamento de letras no alfabeto)
+- **Deslocamento**: Configurável pelo usuário via argumento `--caesar-shift` (padrão: 1)
+- **Escopo**: Apenas letras (A-Z, a-z) são deslocadas, outros caracteres permanecem inalterados
+- **Troca de Parâmetros**: Deslocamento compartilhado via handshake
 - **Checksum**: Calculado sobre o payload original (antes da criptografia)
 - **Ativação**: Opcional via flag `--enable-encryption` no cliente
 
 **Uso:**
 
 ```bash
-# Cliente com criptografia habilitada
+# Cliente com criptografia habilitada (shift padrão = 1)
 python client.py --enable-encryption
+
+# Cliente com criptografia e shift customizado
+python client.py --enable-encryption --caesar-shift 3
 
 # Servidor (suporta criptografia automaticamente)
 python server.py
 ```
 
+**Exemplo de Cifra de César:**
+
+- **Shift = 1**: "SUKAR" → "TVLBS"
+- **Shift = 3**: "ABC" → "DEF"
+- **Shift = 1**: "Olá" → "Pmá" (apenas letras são deslocadas)
+
 **Fluxo de Criptografia:**
 
-1. Cliente gera chave Fernet durante o handshake
-2. Chave é enviada ao servidor no handshake (codificada em base64)
-3. Cliente criptografa cada payload antes de enviar
-4. Servidor descriptografa cada payload ao receber
+1. Cliente define deslocamento (shift) da Cifra de César
+2. Deslocamento é enviado ao servidor no handshake
+3. Cliente criptografa cada payload antes de enviar (desloca letras)
+4. Servidor descriptografa cada payload ao receber (desloca no sentido oposto)
 5. Checksum é calculado/verificado sobre o payload original
 
-**Segurança:**
+**Características da Cifra de César:**
 
-- Chave única por sessão (gerada aleatoriamente)
-- Criptografia autenticada (Fernet inclui HMAC)
-- Payloads são codificados em base64 para transmissão via JSON
+- Deslocamento circular (Z + 1 = A)
+- Apenas letras são afetadas (espaços, números e símbolos permanecem iguais)
+- Deslocamento configurável pelo usuário
 
 ### 📊 **Status Atual do Projeto**
 
@@ -187,7 +196,7 @@ python server.py
 | **Entrega 2**            | ✅ **Concluída** | 100%      | Go-Back-N e Selective Repeat funcionais  |
 | **Entrega 3**            | ✅ **Concluída** | 100%      | Simulação de erros e perdas implementada |
 | **Extra - Integridade**  | ✅ **Concluída** | 100%      | Algoritmo de checagem de integridade     |
-| **Extra - Criptografia** | ✅ **Concluída** | 100%      | Criptografia simétrica (Fernet/AES)      |
+| **Extra - Criptografia** | ✅ **Concluída** | 100%      | Criptografia simétrica (Cifra de César)  |
 
 ### 🚀 **Próximos Passos**
 

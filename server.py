@@ -1,8 +1,6 @@
 import socket
 import json
 import argparse
-import base64
-from cryptography.fernet import Fernet
 
 # Servidor com troca de mensagens
 
@@ -56,13 +54,20 @@ def receive_message(socket):
     
     return json.loads(message_data.decode('utf-8')) # Converte de volta para dicionário
 
-def decrypt_payload(encrypted_payload, key):
-    """Descriptografa o payload usando a chave fornecida"""
-    fernet = Fernet(key)
-    # Decodificar de base64
-    encrypted_bytes = base64.b64decode(encrypted_payload.encode('utf-8'))
-    decrypted = fernet.decrypt(encrypted_bytes)
-    return decrypted.decode('utf-8')
+def caesar_decrypt(text, shift):
+    """Descriptografa texto usando Cifra de César (desloca no sentido oposto)"""
+    result = []
+    for char in text:
+        if char.isalpha():
+            # Determinar se é maiúscula ou minúscula
+            base = ord('A') if char.isupper() else ord('a')
+            # Aplicar deslocamento circular no sentido oposto
+            shifted = (ord(char) - base - shift) % 26
+            result.append(chr(base + shifted))
+        else:
+            # Manter caracteres não-alfabéticos inalterados
+            result.append(char)
+    return ''.join(result)
 
 def calculate_checksum(data):
     """Calcula soma de verificação simples"""
@@ -108,16 +113,15 @@ while True:
     
     # Verificar se cliente solicitou criptografia
     encryption_enabled = handshake_data.get("encryption_enabled", False)
-    encryption_key = None
+    caesar_shift = None
     
     if encryption_enabled:
-        # Receber chave de criptografia do cliente
-        if "encryption_key" in handshake_data:
-            encryption_key_b64 = handshake_data["encryption_key"]
-            encryption_key = base64.b64decode(encryption_key_b64.encode('utf-8'))
-            print("[ENCRYPTION] Chave de criptografia recebida e configurada")
+        # Receber shift da Cifra de César do cliente
+        if "caesar_shift" in handshake_data:
+            caesar_shift = handshake_data["caesar_shift"]
+            print(f"[ENCRYPTION] Cifra de César recebida com deslocamento: {caesar_shift}")
         else:
-            print("[WARNING] Criptografia solicitada mas chave não fornecida")
+            print("[WARNING] Criptografia solicitada mas shift não fornecido")
             encryption_enabled = False
     
     # Enviar resposta do handshake
@@ -178,10 +182,10 @@ while True:
                 
                 # Descriptografar payload se necessário
                 payload = payload_encrypted
-                if is_encrypted and encryption_key:
+                if is_encrypted and caesar_shift is not None:
                     try:
-                        payload = decrypt_payload(payload_encrypted, encryption_key)
-                        print(f"[ENCRYPTION] Payload descriptografado para pacote {seq_num}")
+                        payload = caesar_decrypt(payload_encrypted, caesar_shift)
+                        print(f"[ENCRYPTION] Payload descriptografado para pacote {seq_num}: '{payload_encrypted}' -> '{payload}'")
                     except Exception as e:
                         print(f"[ERROR] Falha ao descriptografar pacote {seq_num}: {e}")
                         payload = payload_encrypted  # Usar payload original em caso de erro

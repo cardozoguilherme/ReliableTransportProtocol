@@ -43,6 +43,7 @@ python client.py
 | `--text`              | (mensagem padrão) | `--text "Minha mensagem"`            |
 | `--payload-size`      | `4`               | `--payload-size 2`                   |
 | `--enable-encryption` | (desabilitado)    | `--enable-encryption`                |
+| `--caesar-shift`      | `1`               | `--caesar-shift 3`                   |
 | `--drop-packets`      | (nenhum)          | `--drop-packets "2,5"` ou `"3-7"`    |
 | `--corrupt-packets`   | (nenhum)          | `--corrupt-packets "3,7"` ou `"4-6"` |
 
@@ -89,15 +90,24 @@ python server.py --port 9090 --window-size 7
 python client.py --port 9090 --operation-mode selective_repeat --timeout 3.0 --max-message-size 150
 ```
 
-### Com criptografia simétrica
+### Com criptografia (Cifra de César)
 
 ```bash
 # Servidor (suporta criptografia automaticamente)
 python server.py
 
-# Cliente com criptografia habilitada
+# Cliente com criptografia habilitada (shift padrão = 1)
 python client.py --enable-encryption
+
+# Cliente com criptografia e shift customizado
+python client.py --enable-encryption --caesar-shift 3
 ```
+
+**Exemplo de Cifra de César:**
+
+- Shift = 1: "SUKAR" → "TVLBS"
+- Shift = 3: "ABC" → "DEF"
+- Apenas letras (A-Z, a-z) são deslocadas, outros caracteres permanecem iguais
 
 ### Com simulação de erros
 
@@ -131,18 +141,10 @@ python client.py --help
 - **Strings com espaços:** Use aspas: `--text "mensagem com espaços"`
 - **Modos:** `go_back_n` (padrão) ou `selective_repeat`
 - **Payload máximo:** 4 caracteres (conforme especificação - valores maiores são limitados automaticamente)
-- **Criptografia:** Use `--enable-encryption` no cliente para criptografar payloads (requer biblioteca `cryptography`)
+- **Criptografia:** Use `--enable-encryption` no cliente para criptografar payloads usando Cifra de César. Use `--caesar-shift` para definir o deslocamento (padrão: 1)
 - **Simulação de Erros:** Use `--drop-packets` para simular perdas e `--corrupt-packets` para simular corrupção
 - **Intervalos:** Suporte a intervalos (`"2-5"`) e listas (`"2,5,10"`) para simulação de erros
 
 ## Instalação de Dependências
 
-```bash
-pip install -r requirements.txt
-```
-
-ou
-
-```bash
-pip install cryptography
-```
+O projeto usa apenas bibliotecas padrão do Python. Não são necessárias dependências externas.

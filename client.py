@@ -2,9 +2,7 @@ import socket
 import json
 import time
 import argparse
-import base64
 import datetime
-from cryptography.fernet import Fernet
 
 # Cliente com troca de mensagens
 
@@ -23,7 +21,9 @@ parser.add_argument('--text', type=str,
 parser.add_argument('--payload-size', type=int, default=4, 
                     help='Tamanho do segmento/payload (padrão: 4, máximo: 4)')
 parser.add_argument('--enable-encryption', action='store_true',
-                    help='Ativar criptografia simétrica para payloads')
+                    help='Ativar criptografia Cifra de César para payloads')
+parser.add_argument('--caesar-shift', type=int, default=1,
+                    help='Número de deslocamento para Cifra de César (padrão: 1)')
 parser.add_argument('--drop-packets', type=str, default='',
                     help='Pacotes a perder (ex: "2,5,10" ou "2-5" para intervalo)')
 parser.add_argument('--corrupt-packets', type=str, default='',
@@ -39,6 +39,7 @@ TIMEOUT_DURATION = args.timeout
 TEXT_TO_SEND = args.text
 PAYLOAD_SIZE = min(args.payload_size, 4)  # Garantir que não exceda 4
 ENABLE_ENCRYPTION = args.enable_encryption
+CAESAR_SHIFT = args.caesar_shift
 
 # Processar lista de pacotes para perder
 packets_to_drop = set()
@@ -105,16 +106,21 @@ def receive_message(socket, timeout=None):
             raise TimeoutError("Timeout ao receber mensagem")
         raise
 
-def generate_encryption_key():
-    """Gera uma chave de criptografia simétrica usando Fernet"""
-    return Fernet.generate_key()
+def caesar_encrypt(text, shift):
+    """Criptografa texto usando Cifra de César"""
+    result = []
+    for char in text:
+        if char.isalpha():
+            # Determinar se é maiúscula ou minúscula
+            base = ord('A') if char.isupper() else ord('a')
+            # Aplicar deslocamento circular
+            shifted = (ord(char) - base + shift) % 26
+            result.append(chr(base + shifted))
+        else:
+            # Manter caracteres não-alfabéticos inalterados
+            result.append(char)
+    return ''.join(result)
 
-def encrypt_payload(payload, key):
-    """Criptografa o payload usando a chave fornecida"""
-    fernet = Fernet(key)
-    encrypted = fernet.encrypt(payload.encode('utf-8'))
-    # Codificar em base64 para transmissão via JSON
-    return base64.b64encode(encrypted).decode('utf-8')
 
 def calculate_checksum(data):
     """Calcula soma de verificação simples"""
@@ -138,7 +144,7 @@ sent_packets = {}  # Armazenar pacotes enviados
 acknowledged_packets_global = set()  # Pacotes confirmados
 packet_send_times = {}  # Timestamp de quando cada pacote foi enviado (para timeout síncrono)
 
-def start_timer(seq_num, packet):
+def start_timer(seq_num):
     """Registra timestamp de envio do pacote (para timeout síncrono)"""
     packet_send_times[seq_num] = time.time()
     print(f"\n[{get_timestamp()}] [TIMER] Timer iniciado para pacote {seq_num} ({TIMEOUT_DURATION}s)")
@@ -168,18 +174,12 @@ def retransmit_packet(seq_num):
     
     send_message(s, retry_packet)
     packet_send_times[seq_num] = time.time()
-    start_timer(seq_num, sent_packets[seq_num])
+    start_timer(seq_num)
 
 print(f"Conectado ao servidor {HOST}:{PORT}")
 
 # Handshake - negociação inicial
 print("Iniciando handshake...")
-
-# Gerar chave de criptografia se habilitado
-encryption_key = None
-if ENABLE_ENCRYPTION:
-    encryption_key = generate_encryption_key()
-    print(f"[ENCRYPTION] Chave de criptografia gerada")
 
 handshake_data = {
     "type": "handshake",           # Tipo da mensagem
@@ -188,10 +188,10 @@ handshake_data = {
     "encryption_enabled": ENABLE_ENCRYPTION  # Flag de criptografia
 }
 
-# Adicionar chave de criptografia se habilitada
-if ENABLE_ENCRYPTION and encryption_key:
-    # Codificar chave em base64 para transmissão via JSON
-    handshake_data["encryption_key"] = base64.b64encode(encryption_key).decode('utf-8')
+# Adicionar shift da Cifra de César se habilitada
+if ENABLE_ENCRYPTION:
+    print(f"[ENCRYPTION] Cifra de César ativada com deslocamento: {CAESAR_SHIFT}")
+    handshake_data["caesar_shift"] = CAESAR_SHIFT
 
 print(f"Enviando: {handshake_data}")
 send_message(s, handshake_data) # Enviar handshake
@@ -204,11 +204,10 @@ print(f"Resposta recebida: {response}")
 # Verificar se servidor confirmou criptografia
 if ENABLE_ENCRYPTION:
     if response.get("encryption_enabled", False):
-        print("[ENCRYPTION] Criptografia confirmada pelo servidor")
+        print(f"[ENCRYPTION] Criptografia confirmada pelo servidor (shift: {CAESAR_SHIFT})")
     else:
         print("[WARNING] Servidor não confirmou criptografia, desabilitando...")
         ENABLE_ENCRYPTION = False
-        encryption_key = None
 
 print("Handshake concluído!")
 
@@ -275,23 +274,22 @@ while base_seq < len(segments):
             simulation_stats['packets_dropped'] += 1
             # Não enviar o pacote, mas armazenar para possível retransmissão
             # Criar o pacote normalmente para poder retransmitir depois
-            payload_to_send = segment
-            if ENABLE_ENCRYPTION and encryption_key:
-                payload_to_send = encrypt_payload(segment, encryption_key)
+            payload_to_send = caesar_encrypt(segment, CAESAR_SHIFT) if ENABLE_ENCRYPTION else segment
             checksum = calculate_checksum(segment)
             packet = create_data_packet(next_seq_to_send, payload_to_send, checksum)
             if ENABLE_ENCRYPTION:
                 packet["encrypted"] = True
             sent_packets[next_seq_to_send] = packet
-            start_timer(next_seq_to_send, packet)
+            start_timer(next_seq_to_send)
             next_seq_to_send += 1
             continue
         
         # Preparar payload (criptografar se necessário)
-        payload_to_send = segment
-        if ENABLE_ENCRYPTION and encryption_key:
-            payload_to_send = encrypt_payload(segment, encryption_key)
-            print(f"[ENCRYPTION] Payload criptografado para pacote {next_seq_to_send}")
+        if ENABLE_ENCRYPTION:
+            payload_to_send = caesar_encrypt(segment, CAESAR_SHIFT)
+            print(f"[ENCRYPTION] Payload criptografado para pacote {next_seq_to_send}: '{segment}' -> '{payload_to_send}'")
+        else:
+            payload_to_send = segment
         
         # Calcular checksum do payload original (antes da criptografia)
         checksum = calculate_checksum(segment)
@@ -320,7 +318,7 @@ while base_seq < len(segments):
         # Armazenar pacote enviado
         sent_packets[next_seq_to_send] = packet
         # Iniciar timer para este pacote
-        start_timer(next_seq_to_send, packet)
+        start_timer(next_seq_to_send)
         
         next_seq_to_send += 1
     
