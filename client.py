@@ -1,9 +1,9 @@
 import socket
 import json
 import time
-import threading
 import argparse
 import base64
+import datetime
 from cryptography.fernet import Fernet
 
 # Cliente com troca de mensagens
@@ -101,11 +101,9 @@ def receive_message(socket, timeout=None):
         
         return json.loads(message_data.decode('utf-8')) # Converte de volta para dicionário
     except (OSError, TimeoutError) as e:
-        # socket.timeout é uma subclasse de OSError em Python 3.3+
-        # Verificar se é um timeout
         if "timed out" in str(e).lower() or "timeout" in str(e).lower():
             raise TimeoutError("Timeout ao receber mensagem")
-        raise  # Re-raise outros erros
+        raise
 
 def generate_encryption_key():
     """Gera uma chave de criptografia simétrica usando Fernet"""
@@ -131,88 +129,46 @@ def create_data_packet(seq_num, payload, checksum):
         "checksum": checksum # Soma de verificação
     }
 
-# Variáveis globais para timer e protocolo
-timers = {}  # Dicionário para armazenar timers ativos
-sent_packets = {}  # Armazenar pacotes enviados (acessível por timers)
-acknowledged_packets_global = set()  # Pacotes confirmados (acessível por timers)
-retransmission_lock = threading.Lock()  # Lock para evitar retransmissões concorrentes
-protocol_state = {
-    'operation_mode': 'go_back_n',
-    'base_seq': 0,
-    'next_seq_to_send': 0,
-    'window_size': 5
-}
+def get_timestamp():
+    """Retorna timestamp formatado para logs"""
+    return datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]
 
-def start_timer(seq_num, packet, socket_conn):
-    """Inicia timer para um pacote específico"""
-    def timeout_handler():
-        # Verificar se o pacote já foi confirmado ou adquirir lock
-        if seq_num in acknowledged_packets_global or not retransmission_lock.acquire(blocking=False):
-            return
-        
-        try:
-            # Verificar novamente após adquirir o lock
-            if seq_num in acknowledged_packets_global:
-                return
-            
-            print(f"[TIMEOUT] Timeout para pacote {seq_num} - retransmitindo...")
-            op_mode = protocol_state['operation_mode']
-            base = protocol_state['base_seq']
-            next_seq = protocol_state['next_seq_to_send']
-            
-            if op_mode == "go_back_n":
-                # Go-Back-N: Retransmitir toda a janela a partir do base
-                print(f"[GBN] Go-Back-N: Retransmitindo janela a partir de {base}")
-                for i in range(base, next_seq):
-                    if i not in acknowledged_packets_global and i in sent_packets:
-                        retry_packet = sent_packets[i].copy()
-                        if 'original_checksum' in retry_packet:
-                            retry_packet['checksum'] = retry_packet['original_checksum']
-                        send_message(socket_conn, retry_packet)
-                        print(f"Pacote {i} retransmitido por timeout (Go-Back-N)")
-                        start_timer(i, sent_packets[i], socket_conn)
-            else:
-                # Selective Repeat: Retransmitir apenas o pacote específico
-                if seq_num in sent_packets and seq_num not in acknowledged_packets_global:
-                    retry_packet = sent_packets[seq_num].copy()
-                    if 'original_checksum' in retry_packet:
-                        retry_packet['checksum'] = retry_packet['original_checksum']
-                    send_message(socket_conn, retry_packet)
-                    print(f"Pacote {seq_num} retransmitido por timeout")
-                    start_timer(seq_num, sent_packets[seq_num], socket_conn)
-        except (ConnectionError, OSError) as e:
-            print(f"[ERROR] Erro ao retransmitir pacote {seq_num}: {e}")
-        finally:
-            retransmission_lock.release()
-    
-    # Cancelar timer anterior se existir
-    if seq_num in timers:
-        timers[seq_num].cancel()
-    
-    # Criar novo timer
-    timer = threading.Timer(TIMEOUT_DURATION, timeout_handler)
-    timers[seq_num] = timer
-    timer.start()
-    print(f"[TIMER] Timer iniciado para pacote {seq_num} ({TIMEOUT_DURATION}s)")
+# Variáveis globais para timer e protocolo
+sent_packets = {}  # Armazenar pacotes enviados
+acknowledged_packets_global = set()  # Pacotes confirmados
+packet_send_times = {}  # Timestamp de quando cada pacote foi enviado (para timeout síncrono)
+
+def start_timer(seq_num, packet):
+    """Registra timestamp de envio do pacote (para timeout síncrono)"""
+    packet_send_times[seq_num] = time.time()
+    print(f"\n[{get_timestamp()}] [TIMER] Timer iniciado para pacote {seq_num} ({TIMEOUT_DURATION}s)")
 
 def stop_timer(seq_num):
-    """Para timer de um pacote específico"""
-    if seq_num in timers:
-        timers[seq_num].cancel()
-        del timers[seq_num]
-        print(f"[TIMER] Timer cancelado para pacote {seq_num}")
-
-def stop_all_timers():
-    """Para todos os timers ativos"""
-    for timer in timers.values():
-        timer.cancel()
-    timers.clear()
-    print("[TIMER] Todos os timers cancelados")
+    """Remove timestamp do pacote confirmado"""
+    if seq_num in packet_send_times:
+        del packet_send_times[seq_num]
+        print(f"[{get_timestamp()}] [TIMER] Timer cancelado para pacote {seq_num}\n")
 
 # Criar conexão com o servidor
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # Socket TCP
-s.settimeout(0.5)  # Timeout de 0.5s para permitir verificação de timers
 s.connect((HOST, PORT)) # Conectar ao servidor
+
+def retransmit_packet(seq_num):
+    """Retransmite um pacote específico com checksum corrigido se necessário"""
+    if seq_num not in sent_packets or seq_num in acknowledged_packets_global:
+        return
+    
+    retry_packet = sent_packets[seq_num].copy()
+    if 'original_checksum' in retry_packet:
+        retry_packet['checksum'] = retry_packet['original_checksum']
+        print(f"[{get_timestamp()}] [RETRY] Retransmitindo pacote {seq_num} com checksum corrigido")
+    else:
+        payload_display = retry_packet.get('payload', 'encrypted')
+        print(f"[{get_timestamp()}] [RETRY] Retransmitindo pacote {seq_num}: '{payload_display}'\n")
+    
+    send_message(s, retry_packet)
+    packet_send_times[seq_num] = time.time()
+    start_timer(seq_num, sent_packets[seq_num])
 
 print(f"Conectado ao servidor {HOST}:{PORT}")
 
@@ -243,7 +199,6 @@ send_message(s, handshake_data) # Enviar handshake
 # Handshake não precisa de timeout curto, usar timeout maior
 s.settimeout(10.0)  # Timeout maior para handshake
 response = receive_message(s) # Receber confirmação (ack do servidor)
-s.settimeout(0.5)  # Voltar ao timeout curto para loop principal
 print(f"Resposta recebida: {response}")
 
 # Verificar se servidor confirmou criptografia
@@ -277,9 +232,8 @@ if len(text_to_send) > max_message_size:
 else:
     print(f"[OK] Mensagem dentro do limite de {max_message_size} caracteres")
 
-# Dividir texto em segmentos de até 4 caracteres (configurável por PAYLOAD_SIZE)
-effective_payload = PAYLOAD_SIZE if PAYLOAD_SIZE <= 4 else 4
-segments = [text_to_send[i:i+effective_payload] for i in range(0, len(text_to_send), effective_payload)] # Cortar em pedaços de até 4 caracteres
+# Dividir texto em segmentos de até 4 caracteres
+segments = [text_to_send[i:i+PAYLOAD_SIZE] for i in range(0, len(text_to_send), PAYLOAD_SIZE)]
 print(f"Segmentos criados: {segments}\n")
 
 # Implementar protocolo baseado no modo de operação
@@ -287,12 +241,9 @@ window_size = response["window_size"]  # Tamanho da janela do servidor
 operation_mode = response["operation_mode"]  # Modo de operação
 sent_packets.clear()  # Limpar pacotes anteriores (variável global)
 acknowledged_packets_global.clear()  # Limpar pacotes confirmados (variável global)
+packet_send_times.clear()  # Limpar timestamps anteriores
 next_seq_to_send = 0                   # Próximo número de sequência a enviar
 base_seq = 0                          # Base da janela (primeiro não confirmado)
-
-# Atualizar estado global para timers
-protocol_state['operation_mode'] = operation_mode
-protocol_state['window_size'] = window_size
 
 if operation_mode == "go_back_n":
     print(f"[GBN] Iniciando Go-Back-N com janela de tamanho: {window_size}")
@@ -301,7 +252,6 @@ elif operation_mode == "selective_repeat":
 else:
     print(f"[WARNING] Modo desconhecido: {operation_mode}, usando Go-Back-N")
     operation_mode = "go_back_n"
-    protocol_state['operation_mode'] = operation_mode
 
 # Mostrar configuração de simulação se houver
 if packets_to_drop or packets_to_corrupt:
@@ -314,10 +264,6 @@ if packets_to_drop or packets_to_corrupt:
 
 # Enviar pacotes dentro da janela
 while base_seq < len(segments):
-    # Atualizar estado global
-    protocol_state['base_seq'] = base_seq
-    protocol_state['next_seq_to_send'] = next_seq_to_send
-    
     # Enviar pacotes até preencher a janela
     while next_seq_to_send < min(base_seq + window_size, len(segments)):
         segment = segments[next_seq_to_send]
@@ -337,12 +283,11 @@ while base_seq < len(segments):
             if ENABLE_ENCRYPTION:
                 packet["encrypted"] = True
             sent_packets[next_seq_to_send] = packet
-            # Iniciar timer mesmo sem enviar (para detectar perda)
-            start_timer(next_seq_to_send, packet, s)
+            start_timer(next_seq_to_send, packet)
             next_seq_to_send += 1
-            continue  # Pular o envio deste pacote
+            continue
         
-        # Criptografar payload se criptografia estiver habilitada
+        # Preparar payload (criptografar se necessário)
         payload_to_send = segment
         if ENABLE_ENCRYPTION and encryption_key:
             payload_to_send = encrypt_payload(segment, encryption_key)
@@ -350,14 +295,15 @@ while base_seq < len(segments):
         
         # Calcular checksum do payload original (antes da criptografia)
         checksum = calculate_checksum(segment)
-        
-        # SIMULAÇÃO: Verificar se deve corromper o checksum deste pacote
         original_checksum = checksum
+        
+        # SIMULAÇÃO: Corromper checksum se necessário
         if next_seq_to_send in packets_to_corrupt:
             checksum = (checksum + 1) % 256  # Corromper checksum
             print(f"[SIMULATION] ⚠️  CORRUPÇÃO SIMULADA: Pacote {next_seq_to_send} com checksum incorreto ({original_checksum} -> {checksum})")
             simulation_stats['packets_corrupted'] += 1
         
+        # Criar pacote
         packet = create_data_packet(next_seq_to_send, payload_to_send, checksum)
         
         # Armazenar checksum original para retransmissão (se corrompido, retransmitir com checksum correto)
@@ -368,30 +314,75 @@ while base_seq < len(segments):
         if ENABLE_ENCRYPTION:
             packet["encrypted"] = True
         
-        print(f"[SEND] Enviando pacote {next_seq_to_send}: '{segment}' (checksum: {checksum})")
+        print(f"\n[{get_timestamp()}] [SEND] Enviando pacote {next_seq_to_send}: '{segment}' (checksum: {checksum})")
         send_message(s, packet)
         
         # Armazenar pacote enviado
         sent_packets[next_seq_to_send] = packet
-        
         # Iniciar timer para este pacote
-        start_timer(next_seq_to_send, packet, s)
+        start_timer(next_seq_to_send, packet)
         
         next_seq_to_send += 1
     
     # Aguardar ACKs até janela estar confirmada ou timeout
-    # Atualizar estado global antes de entrar no loop de ACKs
-    protocol_state['base_seq'] = base_seq
-    protocol_state['next_seq_to_send'] = next_seq_to_send
-    
     while base_seq < next_seq_to_send:
+        # Verificar se algum pacote expirou (timeout síncrono baseado em timestamp)
+        current_time = time.time()
+        timeout_occurred = False
+        unacknowledged_packets = [i for i in range(base_seq, next_seq_to_send) 
+                                  if i not in acknowledged_packets_global]
+        
+        # Verificar se algum pacote já expirou
+        for seq in unacknowledged_packets:
+            if seq in packet_send_times:
+                elapsed = current_time - packet_send_times[seq]
+                # Se passou TIMEOUT_DURATION segundos e ainda não foi confirmado
+                if elapsed >= TIMEOUT_DURATION:
+                    timeout_occurred = True
+                    print(f"\n[{get_timestamp()}] [TIMEOUT] Timeout para pacote {seq} após {elapsed:.2f}s (esperado: {TIMEOUT_DURATION}s) - retransmitindo...")
+                    
+                    if operation_mode == "go_back_n":
+                        print(f"[{get_timestamp()}] [GBN] Go-Back-N: Retransmitindo janela a partir de {base_seq}\n")
+                        for i in range(base_seq, next_seq_to_send):
+                            if i not in acknowledged_packets_global:
+                                retransmit_packet(i)
+                    else:
+                        retransmit_packet(seq)
+                    break  # Processar um timeout por vez
+        
+        if timeout_occurred:
+            continue  # Re-avaliar o loop após retransmissão
+        
+        # Calcular timeout restante para o próximo pacote que pode expirar
+        min_timeout = TIMEOUT_DURATION
+        earliest_packet = None
+        for seq in unacknowledged_packets:
+            if seq in packet_send_times:
+                elapsed = current_time - packet_send_times[seq]
+                remaining = TIMEOUT_DURATION - elapsed
+                if remaining > 0 and remaining < min_timeout:
+                    min_timeout = remaining
+                    earliest_packet = seq
+        
+        # Se não há pacotes aguardando ou todos já expiraram, aguardar o timeout completo
+        if min_timeout >= TIMEOUT_DURATION or earliest_packet is None:
+            # Todos os pacotes já expiraram ou não há pacotes - aguardar timeout completo
+            socket_timeout = TIMEOUT_DURATION
+            print(f"\n[{get_timestamp()}] [TIMER] Aguardando {socket_timeout}s para timeout...")
+        else:
+            # Aguardar até o próximo timeout possível
+            socket_timeout = max(0.1, min_timeout)
+            elapsed_for_packet = current_time - packet_send_times[earliest_packet]
+            print(f"\n[{get_timestamp()}] [TIMER] Aguardando {socket_timeout:.2f}s até possível timeout do pacote {earliest_packet} (já decorridos {elapsed_for_packet:.2f}s de {TIMEOUT_DURATION}s)...")
+        
+        # Aguardar resposta com timeout calculado (realmente aguarda o tempo)
         try:
-            # Tentar receber mensagem com timeout curto para não bloquear indefinidamente
-            response = receive_message(s, timeout=0.5)
+            response = receive_message(s, timeout=socket_timeout)
             ack_seq = response["seq_num"]
             
             if response["type"] == "ack":
-                print(f"[ACK] ACK recebido para pacote {ack_seq}")
+                elapsed_time = time.time() - packet_send_times.get(ack_seq, time.time())
+                print(f"\n[{get_timestamp()}] [ACK] ACK recebido para pacote {ack_seq} (tempo decorrido: {elapsed_time:.2f}s)")
                 # Parar timer do pacote confirmado
                 stop_timer(ack_seq)
                 # Marcar pacote como confirmado
@@ -400,63 +391,34 @@ while base_seq < len(segments):
                 # Mover janela se base foi confirmada
                 while base_seq in acknowledged_packets_global:
                     base_seq += 1
-                    protocol_state['base_seq'] = base_seq  # Atualizar estado global
-                    print(f"[WINDOW] Janela movida. Base agora: {base_seq}")
+                    print(f"[{get_timestamp()}] [WINDOW] Janela movida. Base agora: {base_seq}\n")
                     
             elif response["type"] == "nack":
-                print(f"[NACK] NACK recebido para pacote {ack_seq}")
+                print(f"\n[{get_timestamp()}] [NACK] NACK recebido para pacote {ack_seq}\n")
                 
                 if operation_mode == "go_back_n":
-                    # Go-Back-N: Parar todos os timers da janela
                     for i in range(base_seq, next_seq_to_send):
                         stop_timer(i)
-                    
-                    # Go-Back-N: Retransmitir todos os pacotes da janela
-                    print(f"[GBN] Go-Back-N: Retransmitindo janela a partir de {base_seq}")
+                    print(f"[{get_timestamp()}] [GBN] Go-Back-N: Retransmitindo janela a partir de {base_seq}\n")
                     for i in range(base_seq, next_seq_to_send):
-                        if i in sent_packets:
-                            packet = sent_packets[i].copy()  # Copiar para não modificar o original
-                            # Se o pacote foi corrompido, usar checksum correto na retransmissão
-                            if 'original_checksum' in packet:
-                                packet['checksum'] = packet['original_checksum']
-                                print(f"[RETRY] Retransmitindo pacote {i} com checksum corrigido")
-                            else:
-                                print(f"[RETRY] Retransmitindo pacote {i}: '{packet['payload']}'")
-                            send_message(s, packet)
-                            # Reiniciar timer para retransmissão
-                            start_timer(i, packet, s)
-                
+                        retransmit_packet(i)
                 elif operation_mode == "selective_repeat":
-                    # Selective Repeat: Retransmitir apenas o pacote específico
-                    print(f"[SR] Selective Repeat: Retransmitindo apenas pacote {ack_seq}")
-                    if ack_seq in sent_packets:
-                        packet = sent_packets[ack_seq].copy()  # Copiar para não modificar o original
-                        # Se o pacote foi corrompido, usar checksum correto na retransmissão
-                        if 'original_checksum' in packet:
-                            packet['checksum'] = packet['original_checksum']
-                            print(f"[RETRY] Retransmitindo pacote {ack_seq} com checksum corrigido")
-                        else:
-                            print(f"[RETRY] Retransmitindo pacote {ack_seq}: '{packet['payload']}'")
-                        send_message(s, packet)
-                        # Reiniciar timer apenas para este pacote
-                        start_timer(ack_seq, packet, s)
+                    print(f"[{get_timestamp()}] [SR] Selective Repeat: Retransmitindo apenas pacote {ack_seq}\n")
+                    retransmit_packet(ack_seq)
                 
         except (TimeoutError, OSError) as e:
-            # Tratar timeouts: continuar esperando se ainda há pacotes não confirmados
+            # Timeout ocorreu - continuar loop para verificar timestamps
             error_str = str(e).lower()
             if isinstance(e, TimeoutError) or "timed out" in error_str or "timeout" in error_str:
+                # Continue loop to check for expired packets
                 if base_seq < next_seq_to_send:
                     continue
                 break
-            # Outro erro (conexão fechada, etc)
             print(f"Conexão encerrada pelo servidor: {e}")
             break
         except (ConnectionError, json.JSONDecodeError) as e:
             print(f"Conexão encerrada pelo servidor: {e}")
             break
-    
-    # Pequena pausa
-    time.sleep(0.1)
 
 print("\n=== TROCA DE MENSAGENS CONCLUÍDA ===")
 
@@ -467,6 +429,5 @@ if packets_to_drop or packets_to_corrupt:
     print(f"  - Pacotes perdidos: {simulation_stats['packets_dropped']}")
     print(f"  - Pacotes corrompidos: {simulation_stats['packets_corrupted']}")
 
-stop_all_timers()  # Parar todos os timers ativos
 s.close() # Fechar conexão
 print("Desconectado")

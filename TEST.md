@@ -341,5 +341,5 @@ python client.py --corrupt-packets "4-6"
 ### Combinar Tudo
 
 ```bash
-python client.py --operation-mode selective_repeat --enable-encryption --drop-packets "2,5" --corrupt-packets 7 --timeout 3.0 --text "Mensagem de teste"
+python client.py --operation-mode selective_repeat --enable-encryption --drop-packets "2,5" --corrupt-packets 7 --timeout 3.0 --text "Mensagem de teste longa para testar corretamente e validar"
 ```
